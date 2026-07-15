@@ -1,0 +1,231 @@
+import joblib
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt  
+import seaborn as sns
+from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import MinMaxScaler
+from sklearn.svm import SVC
+from sklearn.naive_bayes import GaussianNB
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.pipeline import Pipeline
+from sklearn.model_selection import StratifiedKFold, cross_validate
+from sklearn.metrics import accuracy_score, precision_recall_fscore_support
+
+# =====================================================================
+# 1. LOAD ENGINEERED FEATURES & DATA SPLIT
+# =====================================================================
+csv_path = r"C:\Users\Izzah\Documents\3. FYP\src\EF_vader.csv"
+
+try:
+    df = pd.read_csv(csv_path)
+    print("[SETUP] Loaded EF_vader.csv successfully.")
+except FileNotFoundError:
+    print(f"Error: Could not find {csv_path}. Please run your preprocessing script first!")
+    exit()
+
+# Separate features (X) and target label (y)
+X = df.drop(columns=['DASS_Depression_Level', 'Student_ID', 'Gender', 'Department', 'Semester'])
+y = df['DASS_Depression_Level']
+
+# Dictionary to hold all final evaluation benchmarks for comparison table
+performance_metrics = {}
+
+# Define 12-fold Stratified Cross-Validation 
+cv_strategy = StratifiedKFold(n_splits=12, shuffle=True, random_state=42)
+
+# Define core evaluation metrics to track across all folds
+scoring_metrics = {
+    'accuracy': 'accuracy',
+    'precision_macro': 'precision_macro',
+    'recall_macro': 'recall_macro',
+    'f1_macro': 'f1_macro'
+}
+
+# Defining models
+models = {
+    'SVM': Pipeline([
+        ('scaler', MinMaxScaler()),
+        ('model', SVC(kernel='linear', probability=True, random_state=42))
+    ]),
+    'Naive Bayes': GaussianNB(),
+    'Random Forest': RandomForestClassifier(
+        n_estimators=100, 
+        max_depth=12,             # Cut the tree depth so it can read the DASS brackets
+        min_samples_leaf=2,       # Forces larger leaf groups
+        random_state=42
+    )
+}
+
+# =====================================================================
+# 2. INTERPRETATION ENGINE (CLINICAL PROBABILITY SCALE)
+# =====================================================================
+def interpret_prediction_to_percentage(probabilities, classes):
+    """
+    Maps multi-class prediction probabilities to your specific DASS clinical percentage scale.
+    """
+    bracket_midpoints = {
+        'Normal': 11.5,
+        'Mild': 27.95,
+        'Moderate': 41.0,
+        'Severe': 56.9,
+        'Extremely Severe': 82.15
+    }
+    
+    weighted_score = 0.0
+    prob_dict = dict(zip(classes, probabilities))
+    
+    for label, prob in prob_dict.items():
+        weighted_score += prob * bracket_midpoints[label]
+        
+    if weighted_score <= 23.0:
+        assigned_level = "Normal"
+    elif weighted_score <= 32.0:
+        assigned_level = "Mild"
+    elif weighted_score <= 50.0:
+        assigned_level = "Moderate"
+    elif weighted_score <= 64.0:
+        assigned_level = "Severe"
+    else:
+        assigned_level = "Extremely Severe"
+        
+    return weighted_score, assigned_level
+
+# =====================================================================
+# 3. CROSS-VALIDATION EXECUTION & EVALUATION LOOP
+# =====================================================================
+for model_name, model_obj in models.items():
+    print("\n" + "="*60)
+    print(f"   EVALUATING STAGE: {model_name.upper()} ({cv_strategy.n_splits}-FOLD CV)   ")
+    print("="*60)
+    
+    # Run K Cross-Validation
+    cv_results = cross_validate(
+        estimator=model_obj, 
+        X=X, 
+        y=y, 
+        cv=cv_strategy, 
+        scoring=scoring_metrics,
+        error_score='raise'
+    )
+    
+    # Extract mean scores across folds and convert to percentages
+    final_cv_acc = np.mean(cv_results['test_accuracy']) * 100
+    final_cv_prec = np.mean(cv_results['test_precision_macro']) * 100
+    final_cv_rec = np.mean(cv_results['test_recall_macro']) * 100
+    final_cv_f1 = np.mean(cv_results['test_f1_macro']) * 100
+    
+    # Store in performance matrix
+    performance_metrics[model_name] = [final_cv_acc, final_cv_prec, final_cv_rec, final_cv_f1]
+    print(f"[{model_name}] CV Complete. Mean Accuracy: {final_cv_acc:.2f}%")
+
+    # Train model instance on the whole dataset to extract sample probabilities
+    model_obj.fit(X, y)
+    
+    # Safe check for extracting classes from a pipeline vs baseline model
+    classes = model_obj.classes_ if hasattr(model_obj, 'classes_') else model_obj.named_steps['model'].classes_
+    sample_probs = model_obj.predict_proba(X)
+    
+    print(f"\nSample {model_name} Dashboard Interpretations:")
+    for i in range(min(2, len(X))):
+        pct, lvl = interpret_prediction_to_percentage(sample_probs[i], classes)
+        print(f"   Student Profile Index {i} -> {pct:.1f}% Depression Leaning | [{lvl}]")
+
+
+# =====================================================================
+# 4. SYSTEM COMPREHENSIVE ARCHITECTURAL COMPARISON MATRIX
+# =====================================================================
+print("\n" + "="*75)
+print("             FINAL SYSTEM PERFORMANCE COMPARISON MATRIX             ")
+print("="*75)
+
+df_comparison = pd.DataFrame.from_dict(
+    performance_metrics, 
+    orient='index', 
+    columns=['Accuracy (%)', 'Precision (%)', 'Recall (%)', 'F1-Score (%)']
+)
+
+print(df_comparison.round(2).to_string())
+print("="*75)
+
+# 4.5 VISUALIZE PERFORMANCE COMPARISON 
+print("\n" + "="*75)
+print("[VISUALIZATION] Generating performance comparison charts...")
+
+sns.set_theme(style="whitegrid")
+fig, axes = plt.subplots(1, 2, figsize=(16, 6))
+
+df_melted = df_comparison.reset_index().melt(
+    id_vars='index', 
+    var_name='Metric', 
+    value_name='Percentage (%)'
+)
+df_melted.rename(columns={'index': 'Model'}, inplace=True)
+
+# CHART 1: Grouped Bar Chart
+sns.barplot(ax=axes[0], data=df_melted, x='Model', y='Percentage (%)', hue='Metric', palette='muted')
+axes[0].set_title("Model Performance Comparison (Grouped Bar Chart)", fontsize=12, fontweight='bold', pad=10)
+axes[0].set_xlabel("Classification Models", fontsize=10)
+axes[0].set_ylabel("Score (%)", fontsize=10)
+axes[0].set_ylim(0, 105)
+
+for container in axes[0].containers:
+    axes[0].bar_label(container, fmt='%.1f%%', padding=3, fontsize=8)
+
+# CHART 2: Line Graph
+sns.lineplot(ax=axes[1], data=df_melted, x='Metric', y='Percentage (%)', hue='Model', marker='o', linewidth=2.5, markersize=8, palette='Set1')
+axes[1].set_title("Model Performance Trends (Line Graph)", fontsize=12, fontweight='bold', pad=10)
+axes[1].set_xlabel("Evaluation Metrics", fontsize=10)
+axes[1].set_ylabel("Score (%)", fontsize=10)
+axes[1].set_ylim(0, 105)
+
+for item in axes[1].lines:
+    x_data = item.get_xdata()
+    y_data = item.get_ydata()
+    for x, y in zip(x_data, y_data):
+        if not np.isnan(y):
+            axes[1].annotate(f'{y:.1f}%', xy=(x, y), xytext=(0, 7), textcoords='offset points', ha='center', fontsize=8, fontweight='semibold')
+
+plt.tight_layout()
+vis_save_path = r"C:\Users\Izzah\Documents\3. FYP\output\model_performance_comparison.png"
+plt.savefig(vis_save_path, dpi=300)
+plt.close()
+
+print(f"Comparison graphics saved successfully at: {vis_save_path}")
+print("="*75)
+
+# =====================================================================
+# 5. EXPORT BEST TRAINED ARCHITECTURE BASED ON PERFORMANCE
+# =====================================================================
+print("\n" + "="*75)
+print("             PRODUCTION ARCHITECTURE DEPLOYMENT ENGINE              ")
+print("="*75)
+
+print("Available models to export: SVM, Naive Bayes, Random Forest")
+chosen_model = input("Enter the exact name of the model you wish to export as 'hybrid_engine': ").strip()
+
+model_mapping = {
+    'SVM': models['SVM'],
+    'Naive Bayes': models['Naive Bayes'],
+    'Random Forest': models['Random Forest']
+}
+
+export_directory = r"C:\Users\Izzah\Documents\3. FYP\output"
+export_path = f"{export_directory}\\hybrid_engine.pkl"
+
+if chosen_model in model_mapping:
+    print(f"\n[EXPORT] Retraining selected architecture ({chosen_model}) on the complete dataset...")
+    
+    X_production = df.drop(columns=['DASS_Depression_Level', 'Student_ID', 'Gender', 'Department', 'Semester'])
+    y_production = df['DASS_Depression_Level']
+
+    best_model_structure = model_mapping[chosen_model]
+    production_model = best_model_structure.fit(X_production, y_production)
+    
+    joblib.dump(production_model, export_path)
+    print(f"Success! The {chosen_model} engine has been compiled and exported.")
+    print(f"Saved directly to validation source path: {export_path}")
+else:
+    print(f"\n Error: '{chosen_model}' does not match any available models.")
+
+print("="*75)

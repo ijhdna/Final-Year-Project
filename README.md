@@ -45,15 +45,19 @@ The system follows a 6-stage pipeline:
 ## 📂 Repository Structure
 ```text
 ├── data/
-│   ├── synthetic_training_data.csv  # Dataset used for model training & testing
-│   └── validation_data.csv          # Unseen validation dataset from UTP students
+│   ├── DASS_Dummy.csv                      # Dummy dataset that follows PCS UTP Database structure
+│   ├── Synthetic_Dataset_From_Dummy.csv    # Dataset used for model training & testing
+│   ├── data benchmark.xlsx                 # Unseen validation dataset from UTP students
+│   └── Validation_Predictions_PowerBI.csv  # Unseen validation dataset from UTP students
 ├── models/
-│   └── random_forest_model.pkl      # Trained Random Forest model export
+│   └── hybrid_engine.pkl                   # Trained Best model export
 ├── notebooks_or_scripts/
-│   ├── preprocessing.py             # Lemmatization, tokenization, stopword removal
-│   ├── feature_engineering.py       # TF-IDF vectorization and VADER polarity scoring
-│   └── model_training.py            # Supervised classification and 12-fold cross-validation
+│   ├── synthetic_data_creation.py          # Developing the synthetic data
+│   ├── preprocess_feat-eng_senti.py        # Pre-processing & Feature Engineering using SentiWordNet
+│   ├── preprocess_FE_vader                 # Pre-processing & Feature Engineering using VADER
+│   ├── modelling                           # Training and Testing code
+│   └── validation.py                       # Validation by using the hybrid engine with the validation dataset
 ├── dashboard/
-│   └── UTP_Mental_Health_Dashboard.pbix # Power BI dashboard template
+│   └── UTP_Mental_Health_Dashboard.pbix    # UTP Student Mental Health Dashboard Power BI  
 ├── README.md
-└── requirements.txt                 # Python dependencies
+└── requirements.txt                        # Python dependencies
